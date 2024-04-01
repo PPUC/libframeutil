@@ -52,20 +52,20 @@ class Helper
                                    int destHeight);
   static float CalcBrightness(float x);
   static std::string HexDump(const uint8_t* data, size_t size);
-  static void ScaleDownIndexed(uint8_t* pDestFrame, const uint8_t destWidth, const uint8_t destHeight,
+  static void ScaleDownIndexed(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
                                const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight);
-  static void ScaleDownPUP(uint8_t* pDestFrame, const uint8_t destWidth, const uint8_t destHeight,
-                           const uint8_t* pSrcFrame, const uint8_t srcWidth, const uint8_t srcHeight);
-  static void ScaleDown(uint8_t* pDestFrame, const uint8_t destWidth, const uint8_t destHeight,
+  static void ScaleDownPUP(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
+                           const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight);
+  static void ScaleDown(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
                         const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight, uint8_t bits);
   static void ScaleUpIndexed(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16_t srcWidth,
                              const uint8_t srcHeight);
   static void ScaleUp(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight,
                       uint8_t bits);
-  static void CenterIndexed(uint8_t* pDestFrame, const uint8_t destWidth, const uint8_t destHeight,
-                            const uint8_t* pSrcFrame, const uint8_t srcWidth, const uint8_t srcHeight);
-  static void Center(uint8_t* pDestFrame, const uint8_t destWidth, const uint8_t destHeight, const uint8_t* pSrcFrame,
-                     const uint8_t srcWidth, const uint8_t srcHeight, uint8_t bits);
+  static void CenterIndexed(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
+                            const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight);
+  static void Center(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight, const uint8_t* pSrcFrame,
+                     const uint16_t srcWidth, const uint8_t srcHeight, uint8_t bits);
 };
 
 inline int Helper::MapAdafruitIndex(int x, int y, int width, int height, int numLogicalRows)
@@ -330,7 +330,7 @@ std::string Helper::HexDump(const uint8_t* data, size_t size)
   return ss.str();
 }
 
-void Helper::ScaleDownIndexed(uint8_t* pDestFrame, const uint8_t destWidth, const uint8_t destHeight,
+void Helper::ScaleDownIndexed(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
                               const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight)
 {
   memset(pDestFrame, 0, destWidth * destHeight);
@@ -406,8 +406,8 @@ void Helper::ScaleDownIndexed(uint8_t* pDestFrame, const uint8_t destWidth, cons
   }
 }
 
-void Helper::ScaleDownPUP(uint8_t* pDestFrame, const uint8_t destWidth, const uint8_t destHeight,
-                          const uint8_t* pSrcFrame, const uint8_t srcWidth, const uint8_t srcHeight)
+void Helper::ScaleDownPUP(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
+                          const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight)
 {
   memset(pDestFrame, 0, destWidth * destHeight);
   uint8_t xOffset = (destWidth - (srcWidth / 2)) / 2;
@@ -419,7 +419,7 @@ void Helper::ScaleDownPUP(uint8_t* pDestFrame, const uint8_t destWidth, const ui
     std::vector<uint8_t> row;
     row.reserve(srcWidth / 2);
 
-    for (uint8_t x = 0; x < srcWidth; x += 2)
+    for (uint16_t x = 0; x < srcWidth; x += 2)
     {
       uint8_t pixel1 = pSrcFrame[y * srcWidth + x];
       uint8_t pixel2 = pSrcFrame[y * srcWidth + x + 1];
@@ -440,7 +440,7 @@ void Helper::ScaleDownPUP(uint8_t* pDestFrame, const uint8_t destWidth, const ui
   }
 }
 
-void Helper::ScaleDown(uint8_t* pDestFrame, const uint8_t destWidth, const uint8_t destHeight, const uint8_t* pSrcFrame,
+void Helper::ScaleDown(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight, const uint8_t* pSrcFrame,
                        const uint16_t srcWidth, const uint8_t srcHeight, uint8_t bits)
 {
   memset(pDestFrame, 0, destWidth * destHeight);
@@ -542,9 +542,9 @@ void Helper::ScaleUp(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16
   uint8_t* h = (uint8_t*)malloc(bytes);
   uint8_t* i = (uint8_t*)malloc(bytes);
 
-  for (uint16_t x = 0; x < srcHeight; x++)
+  for (uint16_t x = 0; x < srcWidth; x++)
   {
-    for (uint16_t y = 0; y < srcWidth; y++)
+    for (uint16_t y = 0; y < srcHeight; y++)
     {
       for (uint8_t tc = 0; tc < bytes; tc++)
       {
@@ -660,8 +660,8 @@ void Helper::ScaleUpIndexed(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const
   ScaleUp(pDestFrame, pSrcFrame, srcWidth, srcHeight, 8);
 }
 
-void Helper::Center(uint8_t* pDestFrame, const uint8_t destWidth, const uint8_t destHeight, const uint8_t* pSrcFrame,
-                    const uint8_t srcWidth, const uint8_t srcHeight, uint8_t bits)
+void Helper::Center(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight, const uint8_t* pSrcFrame,
+                    const uint16_t srcWidth, const uint8_t srcHeight, uint8_t bits)
 {
   uint8_t bytes = bits / 8;  // RGB24 (3 byte) or RGB16 (2 byte)
 
@@ -676,8 +676,8 @@ void Helper::Center(uint8_t* pDestFrame, const uint8_t destWidth, const uint8_t 
   }
 }
 
-void Helper::CenterIndexed(uint8_t* pDestFrame, const uint8_t destWidth, const uint8_t destHeight,
-                           const uint8_t* pSrcFrame, const uint8_t srcWidth, const uint8_t srcHeight)
+void Helper::CenterIndexed(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
+                           const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight)
 {
   Center(pDestFrame, destWidth, destHeight, pSrcFrame, srcWidth, srcHeight, 8);
 }
