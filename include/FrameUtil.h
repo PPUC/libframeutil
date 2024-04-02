@@ -10,7 +10,7 @@
 
 #define FRAMEUTIL_VERSION_MAJOR 0  // X Digits
 #define FRAMEUTIL_VERSION_MINOR 1  // Max 2 Digits
-#define FRAMEUTIL_VERSION_PATCH 0  // Max 2 Digits
+#define FRAMEUTIL_VERSION_PATCH 1  // Max 2 Digits
 
 #define _FRAMEUTIL_STR(x) #x
 #define FRAMEUTIL_STR(x) _FRAMEUTIL_STR(x)
@@ -39,14 +39,13 @@ enum class ColorMatrix
 class Helper
 {
  public:
-  static inline int MapAdafruitIndex(int x, int y, int width, int height, int numLogicalRows);
+  static int MapAdafruitIndex(int x, int y, int width, int height, int numLogicalRows);
   static void ConvertToRgb24(uint8_t* pFrameRgb24, uint8_t* pFrame, int size, uint8_t* pPalette);
   static void Split(uint8_t* pPlanes, uint16_t width, uint16_t height, uint8_t bitlen, uint8_t* pFrame);
   static void SplitIntoRgbPlanes(const uint16_t* rgb565, int rgb565Size, int width, int numLogicalRows, uint8_t* dest,
                                  ColorMatrix colorMatrix = ColorMatrix::Rgb);
-  static inline uint16_t InterpolateRgb565Color(uint16_t color1, uint16_t color2, float ratio);
-  static inline uint16_t InterpolatedRgb565Pixel(const uint16_t* src, float srcX, float srcY, int srcWidth,
-                                                 int srcHeight);
+  static uint16_t InterpolateRgb565Color(uint16_t color1, uint16_t color2, float ratio);
+  static uint16_t InterpolatedRgb565Pixel(const uint16_t* src, float srcX, float srcY, int srcWidth, int srcHeight);
   static void ResizeRgb565Bilinear(const uint16_t* src, int srcWidth, int srcHeight, uint16_t* dest, int destWidth,
                                    int destHeight);
   static float CalcBrightness(float x);
@@ -82,7 +81,7 @@ inline int Helper::MapAdafruitIndex(int x, int y, int width, int height, int num
   return index;
 }
 
-void Helper::Split(uint8_t* pPlanes, uint16_t width, uint16_t height, uint8_t bitlen, uint8_t* pFrame)
+inline void Helper::Split(uint8_t* pPlanes, uint16_t width, uint16_t height, uint8_t bitlen, uint8_t* pFrame)
 {
   int planeSize = width * height / 8;
   int pos = 0;
@@ -119,7 +118,7 @@ void Helper::Split(uint8_t* pPlanes, uint16_t width, uint16_t height, uint8_t bi
   free(bd);
 }
 
-void Helper::ConvertToRgb24(uint8_t* pFrameRgb24, uint8_t* pFrame, int size, uint8_t* pPalette)
+inline void Helper::ConvertToRgb24(uint8_t* pFrameRgb24, uint8_t* pFrame, int size, uint8_t* pPalette)
 {
   for (int i = 0; i < size; i++)
   {
@@ -127,8 +126,8 @@ void Helper::ConvertToRgb24(uint8_t* pFrameRgb24, uint8_t* pFrame, int size, uin
   }
 }
 
-void Helper::SplitIntoRgbPlanes(const uint16_t* rgb565, int rgb565Size, int width, int numLogicalRows, uint8_t* dest,
-                                ColorMatrix colorMatrix)
+inline void Helper::SplitIntoRgbPlanes(const uint16_t* rgb565, int rgb565Size, int width, int numLogicalRows,
+                                       uint8_t* dest, ColorMatrix colorMatrix)
 {
   constexpr int pairOffset = 16;
   int height = rgb565Size / width;
@@ -260,8 +259,8 @@ inline uint16_t Helper::InterpolatedRgb565Pixel(const uint16_t* src, float srcX,
   return (uint16_t)(((int)red << 11) | ((int)green << 5) | (int)blue);
 }
 
-void Helper::ResizeRgb565Bilinear(const uint16_t* src, int srcWidth, int srcHeight, uint16_t* dest, int destWidth,
-                                  int destHeight)
+inline void Helper::ResizeRgb565Bilinear(const uint16_t* src, int srcWidth, int srcHeight, uint16_t* dest,
+                                         int destWidth, int destHeight)
 {
   memset(dest, 0, destWidth * destHeight * sizeof(uint16_t));
 
@@ -299,13 +298,13 @@ void Helper::ResizeRgb565Bilinear(const uint16_t* src, int srcWidth, int srcHeig
   }
 }
 
-float Helper::CalcBrightness(float x)
+inline float Helper::CalcBrightness(float x)
 {
   // function to improve the brightness with fx=ax²+bc+c, f(0)=0, f(1)=1, f'(1.1)=0
   return (-x * x + 2.1f * x) / 1.1f;
 }
 
-std::string Helper::HexDump(const uint8_t* data, size_t size)
+inline std::string Helper::HexDump(const uint8_t* data, size_t size)
 {
   constexpr int bytesPerLine = 32;
 
@@ -329,8 +328,8 @@ std::string Helper::HexDump(const uint8_t* data, size_t size)
   return ss.str();
 }
 
-void Helper::ScaleDownIndexed(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
-                              const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight)
+inline void Helper::ScaleDownIndexed(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
+                                     const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight)
 {
   memset(pDestFrame, 0, destWidth * destHeight);
   uint8_t xOffset = (destWidth - (srcWidth / 2)) / 2;
@@ -405,8 +404,8 @@ void Helper::ScaleDownIndexed(uint8_t* pDestFrame, const uint16_t destWidth, con
   }
 }
 
-void Helper::ScaleDownPUP(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
-                          const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight)
+inline void Helper::ScaleDownPUP(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
+                                 const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight)
 {
   memset(pDestFrame, 0, destWidth * destHeight);
   uint8_t xOffset = (destWidth - (srcWidth / 2)) / 2;
@@ -439,8 +438,8 @@ void Helper::ScaleDownPUP(uint8_t* pDestFrame, const uint16_t destWidth, const u
   }
 }
 
-void Helper::ScaleDown(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
-                       const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight, uint8_t bits)
+inline void Helper::ScaleDown(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
+                              const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight, uint8_t bits)
 {
   memset(pDestFrame, 0, destWidth * destHeight);
   uint8_t xOffset = (destWidth - (srcWidth / 2)) / 2;
@@ -523,8 +522,8 @@ void Helper::ScaleDown(uint8_t* pDestFrame, const uint16_t destWidth, const uint
   }
 }
 
-void Helper::ScaleUp(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight,
-                     uint8_t bits)
+inline void Helper::ScaleUp(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16_t srcWidth,
+                            const uint8_t srcHeight, uint8_t bits)
 {
   uint8_t bytes = bits / 8;  // RGB24 (3 byte) or RGB16 (2 byte) or indexed (1 byte)
   uint16_t destWidth = srcWidth * 2;
@@ -654,16 +653,16 @@ void Helper::ScaleUp(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16
   free(i);
 }
 
-void Helper::ScaleUpIndexed(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16_t srcWidth,
-                            const uint8_t srcHeight)
+inline void Helper::ScaleUpIndexed(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16_t srcWidth,
+                                   const uint8_t srcHeight)
 {
   ScaleUp(pDestFrame, pSrcFrame, srcWidth, srcHeight, 8);
 }
 
-void Helper::Center(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight, const uint8_t* pSrcFrame,
-                    const uint16_t srcWidth, const uint8_t srcHeight, uint8_t bits)
+inline void Helper::Center(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
+                           const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight, uint8_t bits)
 {
-  uint8_t bytes = bits / 8;  // RGB24 (3 byte) or RGB16 (2 byte)
+  uint8_t bytes = bits / 8;  // RGB24 (3 byte) or RGB16 (2 byte) or indexed (1 byte)
 
   memset(pDestFrame, 0, destWidth * destHeight * bytes);
   uint8_t xOffset = (destWidth - srcWidth) / 2;
@@ -676,8 +675,8 @@ void Helper::Center(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t
   }
 }
 
-void Helper::CenterIndexed(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
-                           const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight)
+inline void Helper::CenterIndexed(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
+                                  const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight)
 {
   Center(pDestFrame, destWidth, destHeight, pSrcFrame, srcWidth, srcHeight, 8);
 }
