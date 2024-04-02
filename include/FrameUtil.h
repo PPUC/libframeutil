@@ -15,11 +15,10 @@
 #define _FRAMEUTIL_STR(x) #x
 #define FRAMEUTIL_STR(x) _FRAMEUTIL_STR(x)
 
-#define FRAMEUTIL_VERSION            \
+#define FRAMEUTIL_VERSION                \
   FRAMEUTIL_STR(FRAMEUTIL_VERSION_MAJOR) \
   "." FRAMEUTIL_STR(FRAMEUTIL_VERSION_MINOR) "." FRAMEUTIL_STR(FRAMEUTIL_VERSION_PATCH)
-#define FRAMEUTIL_MINOR_VERSION \
-  FRAMEUTIL_STR(FRAMEUTIL_VERSION_MAJOR) "." FRAMEUTIL_STR(FRAMEUTIL_VERSION_MINOR)
+#define FRAMEUTIL_MINOR_VERSION FRAMEUTIL_STR(FRAMEUTIL_VERSION_MAJOR) "." FRAMEUTIL_STR(FRAMEUTIL_VERSION_MINOR)
 
 #include <cstdint>
 #include <cstring>
@@ -440,8 +439,8 @@ void Helper::ScaleDownPUP(uint8_t* pDestFrame, const uint16_t destWidth, const u
   }
 }
 
-void Helper::ScaleDown(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight, const uint8_t* pSrcFrame,
-                       const uint16_t srcWidth, const uint8_t srcHeight, uint8_t bits)
+void Helper::ScaleDown(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight,
+                       const uint8_t* pSrcFrame, const uint16_t srcWidth, const uint8_t srcHeight, uint8_t bits)
 {
   memset(pDestFrame, 0, destWidth * destHeight);
   uint8_t xOffset = (destWidth - (srcWidth / 2)) / 2;
@@ -528,6 +527,7 @@ void Helper::ScaleUp(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16
                      uint8_t bits)
 {
   uint8_t bytes = bits / 8;  // RGB24 (3 byte) or RGB16 (2 byte) or indexed (1 byte)
+  uint16_t destWidth = srcWidth * 2;
   memset(pDestFrame, 0, srcWidth * srcHeight * 4 * bytes);
 
   // we implement scale2x http://www.scale2x.it/algorithm
@@ -542,103 +542,103 @@ void Helper::ScaleUp(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16
   uint8_t* h = (uint8_t*)malloc(bytes);
   uint8_t* i = (uint8_t*)malloc(bytes);
 
-  for (uint16_t x = 0; x < srcWidth; x++)
+  for (uint16_t y = 0; y < srcHeight; y++)
   {
-    for (uint16_t y = 0; y < srcHeight; y++)
+    for (uint16_t x = 0; x < srcWidth; x++)
     {
       for (uint8_t tc = 0; tc < bytes; tc++)
       {
-        if (y == 0 && x == 0)
+        if (x == 0 && y == 0)
         {
           a[tc] = b[tc] = d[tc] = e[tc] = pSrcFrame[tc];
           c[tc] = f[tc] = pSrcFrame[bytes + tc];
           g[tc] = h[tc] = pSrcFrame[row + tc];
           i[tc] = pSrcFrame[row + bytes + tc];
         }
-        else if ((y == 0) && (x == srcHeight - 1))
+        else if ((x == 0) && (y == srcHeight - 1))
         {
-          a[tc] = b[tc] = pSrcFrame[(x - 1) * row + tc];
-          c[tc] = pSrcFrame[(x - 1) * row + bytes + tc];
-          d[tc] = g[tc] = h[tc] = e[tc] = pSrcFrame[x * row + tc];
-          f[tc] = i[tc] = pSrcFrame[x * row + bytes + tc];
+          a[tc] = b[tc] = pSrcFrame[(y - 1) * row + tc];
+          c[tc] = pSrcFrame[(y - 1) * row + bytes + tc];
+          d[tc] = g[tc] = h[tc] = e[tc] = pSrcFrame[y * row + tc];
+          f[tc] = i[tc] = pSrcFrame[y * row + bytes + tc];
         }
-        else if ((y == srcWidth - 1) && (x == 0))
+        else if ((x == srcWidth - 1) && (y == 0))
         {
-          a[tc] = d[tc] = pSrcFrame[y * bytes - bytes + tc];
-          b[tc] = c[tc] = f[tc] = e[tc] = pSrcFrame[y * bytes + tc];
-          g[tc] = pSrcFrame[row + y * bytes - bytes + tc];
-          h[tc] = i[tc] = pSrcFrame[row + y * bytes + tc];
+          a[tc] = d[tc] = pSrcFrame[x * bytes - bytes + tc];
+          b[tc] = c[tc] = f[tc] = e[tc] = pSrcFrame[x * bytes + tc];
+          g[tc] = pSrcFrame[row + x * bytes - bytes + tc];
+          h[tc] = i[tc] = pSrcFrame[row + x * bytes + tc];
         }
-        else if ((y == srcWidth - 1) && (x == srcHeight - 1))
+        else if ((x == srcWidth - 1) && (y == srcHeight - 1))
         {
-          a[tc] = pSrcFrame[x * row - 2 * bytes + tc];
-          b[tc] = c[tc] = pSrcFrame[x * row - bytes + tc];
+          a[tc] = pSrcFrame[y * row - 2 * bytes + tc];
+          b[tc] = c[tc] = pSrcFrame[y * row - bytes + tc];
           d[tc] = g[tc] = pSrcFrame[srcHeight * row - 2 * bytes + tc];
           e[tc] = f[tc] = h[tc] = i[tc] = pSrcFrame[srcHeight * row - bytes + tc];
         }
-        else if (y == 0)
-        {
-          a[tc] = b[tc] = pSrcFrame[(x - 1) * row + tc];
-          c[tc] = pSrcFrame[(x - 1) * row + bytes + tc];
-          d[tc] = e[tc] = pSrcFrame[x * row + tc];
-          f[tc] = pSrcFrame[x * row + bytes + tc];
-          g[tc] = h[tc] = pSrcFrame[(x + 1) * row + tc];
-          i[tc] = pSrcFrame[(x + 1) * row + bytes + tc];
-        }
-        else if (y == srcWidth - 1)
-        {
-          a[tc] = pSrcFrame[x * row - 2 * bytes + tc];
-          b[tc] = c[tc] = pSrcFrame[x * row - bytes + tc];
-          d[tc] = pSrcFrame[(x + 1) * row - 2 * bytes + tc];
-          e[tc] = f[tc] = pSrcFrame[(x + 1) * row - bytes + tc];
-          g[tc] = pSrcFrame[(x + 2) * row - 2 * bytes + tc];
-          h[tc] = i[tc] = pSrcFrame[(x + 2) * row - bytes + tc];
-        }
         else if (x == 0)
         {
-          a[tc] = d[tc] = pSrcFrame[y * bytes - bytes + tc];
-          b[tc] = e[tc] = pSrcFrame[y * bytes + tc];
-          c[tc] = f[tc] = pSrcFrame[y * bytes + bytes + tc];
-          g[tc] = pSrcFrame[row + y * bytes - bytes + tc];
-          h[tc] = pSrcFrame[row + y * bytes + tc];
-          i[tc] = pSrcFrame[row + y * bytes + bytes + tc];
+          a[tc] = b[tc] = pSrcFrame[(y - 1) * row + tc];
+          c[tc] = pSrcFrame[(y - 1) * row + bytes + tc];
+          d[tc] = e[tc] = pSrcFrame[y * row + tc];
+          f[tc] = pSrcFrame[y * row + bytes + tc];
+          g[tc] = h[tc] = pSrcFrame[(y + 1) * row + tc];
+          i[tc] = pSrcFrame[(y + 1) * row + bytes + tc];
         }
-        else if (x == srcHeight - 1)
+        else if (x == srcWidth - 1)
         {
-          a[tc] = pSrcFrame[(x - 1) * row + y * bytes - bytes + tc];
-          b[tc] = pSrcFrame[(x - 1) * row + y * bytes + tc];
-          c[tc] = pSrcFrame[(x - 1) * row + y * bytes + bytes + tc];
-          d[tc] = g[tc] = pSrcFrame[x * row + y * bytes - bytes + tc];
-          e[tc] = h[tc] = pSrcFrame[x * row + y * bytes + tc];
-          f[tc] = i[tc] = pSrcFrame[x * row + y * bytes + bytes + tc];
+          a[tc] = pSrcFrame[y * row - 2 * bytes + tc];
+          b[tc] = c[tc] = pSrcFrame[y * row - bytes + tc];
+          d[tc] = pSrcFrame[(y + 1) * row - 2 * bytes + tc];
+          e[tc] = f[tc] = pSrcFrame[(y + 1) * row - bytes + tc];
+          g[tc] = pSrcFrame[(y + 2) * row - 2 * bytes + tc];
+          h[tc] = i[tc] = pSrcFrame[(y + 2) * row - bytes + tc];
+        }
+        else if (y == 0)
+        {
+          a[tc] = d[tc] = pSrcFrame[x * bytes - bytes + tc];
+          b[tc] = e[tc] = pSrcFrame[x * bytes + tc];
+          c[tc] = f[tc] = pSrcFrame[x * bytes + bytes + tc];
+          g[tc] = pSrcFrame[row + x * bytes - bytes + tc];
+          h[tc] = pSrcFrame[row + x * bytes + tc];
+          i[tc] = pSrcFrame[row + x * bytes + bytes + tc];
+        }
+        else if (y == srcHeight - 1)
+        {
+          a[tc] = pSrcFrame[(y - 1) * row + x * bytes - bytes + tc];
+          b[tc] = pSrcFrame[(y - 1) * row + x * bytes + tc];
+          c[tc] = pSrcFrame[(y - 1) * row + x * bytes + bytes + tc];
+          d[tc] = g[tc] = pSrcFrame[y * row + x * bytes - bytes + tc];
+          e[tc] = h[tc] = pSrcFrame[y * row + x * bytes + tc];
+          f[tc] = i[tc] = pSrcFrame[y * row + x * bytes + bytes + tc];
         }
         else
         {
-          a[tc] = pSrcFrame[(x - 1) * row + y * bytes - bytes + tc];
-          b[tc] = pSrcFrame[(x - 1) * row + y * bytes + tc];
-          c[tc] = pSrcFrame[(x - 1) * row + y * bytes + bytes + tc];
-          d[tc] = pSrcFrame[x * row + y * bytes - bytes + tc];
-          e[tc] = pSrcFrame[x * row + y * bytes + tc];
-          f[tc] = pSrcFrame[x * row + y * bytes + bytes + tc];
-          g[tc] = pSrcFrame[(x + 1) * row + y * bytes - bytes + tc];
-          h[tc] = pSrcFrame[(x + 1) * row + y * bytes + tc];
-          i[tc] = pSrcFrame[(x + 1) * row + y * bytes + bytes + tc];
+          a[tc] = pSrcFrame[(y - 1) * row + x * bytes - bytes + tc];
+          b[tc] = pSrcFrame[(y - 1) * row + x * bytes + tc];
+          c[tc] = pSrcFrame[(y - 1) * row + x * bytes + bytes + tc];
+          d[tc] = pSrcFrame[y * row + x * bytes - bytes + tc];
+          e[tc] = pSrcFrame[y * row + x * bytes + tc];
+          f[tc] = pSrcFrame[y * row + x * bytes + bytes + tc];
+          g[tc] = pSrcFrame[(y + 1) * row + x * bytes - bytes + tc];
+          h[tc] = pSrcFrame[(y + 1) * row + x * bytes + tc];
+          i[tc] = pSrcFrame[(y + 1) * row + x * bytes + bytes + tc];
         }
       }
 
       if (memcmp(b, h, bytes) != 0 && memcmp(d, f, bytes) != 0)
       {
-        memcpy(&pDestFrame[(x * 2 * srcWidth + y * 2) * bytes], memcmp(d, b, bytes) == 0 ? d : e, bytes);
-        memcpy(&pDestFrame[(x * 2 * srcWidth + y * 2 + 1) * bytes], memcmp(b, f, bytes) == 0 ? f : e, bytes);
-        memcpy(&pDestFrame[((x * 2 + 1) * srcWidth + y * 2) * bytes], memcmp(d, h, bytes) == 0 ? d : e, bytes);
-        memcpy(&pDestFrame[((x * 2 + 1) * srcWidth + y * 2 + 1) * bytes], memcmp(h, f, bytes) == 0 ? f : e, bytes);
+        memcpy(&pDestFrame[(y * 2 * destWidth + x * 2) * bytes], memcmp(d, b, bytes) == 0 ? d : e, bytes);
+        memcpy(&pDestFrame[(y * 2 * destWidth + x * 2 + 1) * bytes], memcmp(b, f, bytes) == 0 ? f : e, bytes);
+        memcpy(&pDestFrame[((y * 2 + 1) * destWidth + x * 2) * bytes], memcmp(d, h, bytes) == 0 ? d : e, bytes);
+        memcpy(&pDestFrame[((y * 2 + 1) * destWidth + x * 2 + 1) * bytes], memcmp(h, f, bytes) == 0 ? f : e, bytes);
       }
       else
       {
-        memcpy(&pDestFrame[(x * 2 * srcWidth + y * 2) * bytes], e, bytes);
-        memcpy(&pDestFrame[(x * 2 * srcWidth + y * 2 + 1) * bytes], e, bytes);
-        memcpy(&pDestFrame[((x * 2 + 1) * srcWidth + y * 2) * bytes], e, bytes);
-        memcpy(&pDestFrame[((x * 2 + 1) * srcWidth + y * 2 + 1) * bytes], e, bytes);
+        memcpy(&pDestFrame[(y * 2 * destWidth + x * 2) * bytes], e, bytes);
+        memcpy(&pDestFrame[(y * 2 * destWidth + x * 2 + 1) * bytes], e, bytes);
+        memcpy(&pDestFrame[((y * 2 + 1) * destWidth + x * 2) * bytes], e, bytes);
+        memcpy(&pDestFrame[((y * 2 + 1) * destWidth + x * 2 + 1) * bytes], e, bytes);
       }
     }
   }
