@@ -9,7 +9,7 @@
 #pragma once
 
 #define FRAMEUTIL_VERSION_MAJOR 0  // X Digits
-#define FRAMEUTIL_VERSION_MINOR 2  // Max 2 Digits
+#define FRAMEUTIL_VERSION_MINOR 3  // Max 2 Digits
 #define FRAMEUTIL_VERSION_PATCH 0  // Max 2 Digits
 
 #define _FRAMEUTIL_STR(x) #x
@@ -118,6 +118,40 @@ enum class ColorMatrix
   Rbg
 };
 
+/**
+ * Algorithm used to scale a frame up by an integer factor.
+ *
+ * This is the shared contract between the libraries in the PPUC stack. libserum
+ * persists the selected value in the cROMc header and exposes it through
+ * Serum_GetScalingAlgorithm(); libdmdutil reads it from there, so that in-frame
+ * scaling (during colorization) and display scaling (fitting the finished frame
+ * to the panel) always agree.
+ *
+ * Scale2x is value 0 on purpose: it is the default everything falls back to
+ * when nothing has been selected, which matches the look the stack has always
+ * produced for upscaled frames. Line doubling is an explicit opt-out for
+ * authors who want the raw blocky look.
+ *
+ * The numeric values are part of the persisted cROMc format and of the libserum
+ * C API (SERUM_SCALING_*). Never renumber them; new algorithms append.
+ *
+ * CONSTRAINT ON NEW ALGORITHMS: every algorithm here must be *selection-based*,
+ * i.e. each destination pixel must be one of the source pixels, so that
+ * SelectUpscaled2xSourceIndex() below can express it. libserum relies on that
+ * to carry per-pixel colour-rotation state through the upscale. An
+ * interpolating scaler (hq2x, xBR, bilinear) blends colours and produces pixels
+ * no rotation entry covers; adding one would break carried rotations and force
+ * libserum to re-composite on every rotation tick. If such an algorithm is ever
+ * wanted, add it deliberately and fix the consumers first.
+ */
+enum class ScalingAlgorithm : uint8_t
+{
+  // Scale2x / AdvMAME2x edge-preserving pixel-art upscaling. The default.
+  Scale2x = 0,
+  // Replicate every source pixel into an NxN block.
+  LineDoubling = 1,
+};
+
 class Helper
 {
  public:
@@ -150,6 +184,89 @@ class Helper
   static uint32_t ChecksumWithMask(const uint8_t* input, const uint8_t* mask, size_t len, bool reverse = false);
   static void Scale2XIndexed(uint8_t* pDestFrame, const uint8_t* pSrcFrame, uint16_t srcWidth, uint16_t srcHeight);
   static void ScaleDoubleIndexed(uint8_t* pDestFrame, const uint8_t* pSrcFrame, uint16_t srcWidth, uint16_t srcHeight);
+  static void ScaleDouble(uint8_t* pDestFrame, const uint8_t* pSrcFrame, uint16_t srcWidth, uint16_t srcHeight,
+                          uint8_t bits);
+
+  // Whole-frame 2x upscale dispatched on the shared algorithm selector. These
+  // are the canonical entry points: pick one of these rather than calling a
+  // specific algorithm directly, so a new algorithm only has to be added here.
+  static void ScaleUpBy(ScalingAlgorithm algorithm, uint8_t* pDestFrame, const uint8_t* pSrcFrame, uint16_t srcWidth,
+                        uint16_t srcHeight, uint8_t bits);
+  static void ScaleUpIndexedBy(ScalingAlgorithm algorithm, uint8_t* pDestFrame, const uint8_t* pSrcFrame,
+                               uint16_t srcWidth, uint16_t srcHeight);
+
+  /**
+   * Per-pixel form of the 2x upscalers, expressed as a source *selection*.
+   *
+   * Returns the index into pSrcFrame that the whole-frame upscalers would take
+   * the value at (destX,destY) from. Scale2x never invents a pixel: every
+   * destination pixel is one of the center pixel or its four direct neighbors,
+   * so the operation can be expressed as picking a source coordinate.
+   *
+   * That matters for callers that keep several parallel planes describing the
+   * same pixels. Upscaling each plane by value independently would be wrong as
+   * soon as the algorithm picks a neighbor; upscaling the *selection* once and
+   * copying every plane from the chosen index keeps them consistent.
+   *
+   * libserum relies on this to carry, alongside each colour it composites, that
+   * pixel's colour-rotation entry and its "modified during rotation" flag. That
+   * is what lets it rotate the finished high-resolution frame directly instead
+   * of re-upscaling on every rotation tick, and it is only sound because the
+   * comparison key is the *pre-rotation* colour: the selected source index is
+   * therefore invariant under rotation, so rotate-then-upscale and
+   * upscale-then-rotate agree. See the constraint on ScalingAlgorithm above.
+   *
+   * Out-of-bounds neighbors clamp to the center pixel, matching ScaleUp() and
+   * Scale2XIndexed() exactly.
+   *
+   * Note this form is inherently 2x only. Scale4x is Scale2x applied twice and
+   * needs the intermediate frame, so a 4x addition belongs on the whole-frame
+   * API above, not here.
+   */
+  template <typename T>
+  static inline uint32_t SelectUpscaled2xSourceIndex(const T* pSrcFrame, uint32_t srcWidth, uint32_t srcHeight,
+                                                     uint32_t destX, uint32_t destY, ScalingAlgorithm algorithm)
+  {
+    const uint32_t sx = destX >> 1;
+    const uint32_t sy = destY >> 1;
+    const uint32_t center = sy * srcWidth + sx;
+    if (algorithm != ScalingAlgorithm::Scale2x) return center;
+
+    const uint32_t above = (sy > 0) ? center - srcWidth : center;
+    const uint32_t below = (sy + 1 < srcHeight) ? center + srcWidth : center;
+    const uint32_t left = (sx > 0) ? center - 1 : center;
+    const uint32_t right = (sx + 1 < srcWidth) ? center + 1 : center;
+
+    const T b = pSrcFrame[above];
+    const T h = pSrcFrame[below];
+    const T d = pSrcFrame[left];
+    const T f = pSrcFrame[right];
+    if (b == h || d == f) return center;
+
+    if (destY & 1)
+    {
+      if (destX & 1) return (h == f) ? right : center;
+      return (d == h) ? left : center;
+    }
+    if (destX & 1) return (b == f) ? right : center;
+    return (d == b) ? left : center;
+  }
+
+  /**
+   * Per-pixel form of the 2x upscalers.
+   *
+   * Returns the value the whole-frame upscalers would write at (destX,destY),
+   * without materializing the scaled frame. Use this when only some
+   * destination pixels are needed, when the source frame changes between
+   * nested render passes, or when the pixel type is not uint8_t (libserum
+   * samples both 8-bit shade indices and 16-bit RGB565 with this).
+   */
+  template <typename T>
+  static inline T SampleUpscaled2x(const T* pSrcFrame, uint32_t srcWidth, uint32_t srcHeight, uint32_t destX,
+                                   uint32_t destY, ScalingAlgorithm algorithm)
+  {
+    return pSrcFrame[SelectUpscaled2xSourceIndex(pSrcFrame, srcWidth, srcHeight, destX, destY, algorithm)];
+  }
 
   static void Center(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight, const uint8_t* pSrcFrame,
                      const uint16_t srcWidth, const uint8_t srcHeight, uint8_t bits);
@@ -750,7 +867,6 @@ inline void Helper::CombinePlaneWithMask(const uint8_t* planeA, const uint8_t* p
 inline void Helper::ScaleDoubleIndexed(uint8_t* pDestFrame, const uint8_t* pSrcFrame, uint16_t srcWidth, uint16_t srcHeight)
 {
   uint16_t destWidth = srcWidth * 2;
-  uint16_t destHeight = srcHeight * 2;
   for (uint16_t y = 0; y < srcHeight; y++)
   {
     for (uint16_t x = 0; x < srcWidth; x++)
@@ -807,6 +923,48 @@ inline void Helper::Scale2XIndexed(uint8_t* pDestFrame, const uint8_t* pSrcFrame
       pDestFrame[(outY + 1) * destWidth + outX + 1] = e3;
     }
   }
+}
+
+inline void Helper::ScaleDouble(uint8_t* pDestFrame, const uint8_t* pSrcFrame, uint16_t srcWidth, uint16_t srcHeight,
+                                uint8_t bits)
+{
+  const size_t bytes = bits / 8;
+  const size_t destWidth = (size_t)srcWidth * 2;
+  for (uint16_t y = 0; y < srcHeight; y++)
+  {
+    for (uint16_t x = 0; x < srcWidth; x++)
+    {
+      const uint8_t* pSrc = &pSrcFrame[((size_t)y * srcWidth + x) * bytes];
+      const size_t outX = (size_t)x * 2;
+      const size_t outY = (size_t)y * 2;
+      memcpy(&pDestFrame[(outY * destWidth + outX) * bytes], pSrc, bytes);
+      memcpy(&pDestFrame[(outY * destWidth + outX + 1) * bytes], pSrc, bytes);
+      memcpy(&pDestFrame[((outY + 1) * destWidth + outX) * bytes], pSrc, bytes);
+      memcpy(&pDestFrame[((outY + 1) * destWidth + outX + 1) * bytes], pSrc, bytes);
+    }
+  }
+}
+
+inline void Helper::ScaleUpBy(ScalingAlgorithm algorithm, uint8_t* pDestFrame, const uint8_t* pSrcFrame,
+                              uint16_t srcWidth, uint16_t srcHeight, uint8_t bits)
+{
+  if (algorithm == ScalingAlgorithm::LineDoubling)
+  {
+    ScaleDouble(pDestFrame, pSrcFrame, srcWidth, srcHeight, bits);
+    return;
+  }
+  ScaleUp(pDestFrame, pSrcFrame, srcWidth, (uint8_t)srcHeight, bits);
+}
+
+inline void Helper::ScaleUpIndexedBy(ScalingAlgorithm algorithm, uint8_t* pDestFrame, const uint8_t* pSrcFrame,
+                                     uint16_t srcWidth, uint16_t srcHeight)
+{
+  if (algorithm == ScalingAlgorithm::LineDoubling)
+  {
+    ScaleDoubleIndexed(pDestFrame, pSrcFrame, srcWidth, srcHeight);
+    return;
+  }
+  Scale2XIndexed(pDestFrame, pSrcFrame, srcWidth, srcHeight);
 }
 
 }  // namespace FrameUtil
