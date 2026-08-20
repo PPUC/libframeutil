@@ -51,6 +51,38 @@ black themselves.
 The per-pixel form is inherently 2x only: Scale4x is Scale2x applied twice and
 needs the intermediate frame, so a 4x addition belongs on the whole-frame API.
 
+### Performance
+
+The scalers are header-only templates specialized on the pixel size, so they
+are compiled as part of whatever consumer includes them and pick up that
+build's optimization flags. Nothing here hardcodes an optimization level or a
+`-march`/`-mcpu`, deliberately: a target that knows its CPU (zedmdos does) gets
+the benefit by passing flags at its own build, and no consumer has to fight a
+setting baked into the library.
+
+What matters most is that the consumer builds with `-O3`. GCC vectorizes at
+`-O2` only under a very-cheap cost model; `-O3` switches to the dynamic model,
+which is what lets these loops reach NEON. Measured on aarch64 GCC 16, that is
+worth about 5x on the formats with a native pixel type. `-mcpu=<cpu>` is worth
+adding on top where the CPU is known, and the choices this header makes hold
+across Cortex-A53, A72 and A76 alike, so one build of the header suits all of
+them.
+
+The scalers are tuned for GCC/aarch64, clang/aarch64 and clang/x86_64, which
+covers Raspberry Pi, macOS and Windows between them. Two decisions differ by
+compiler and are selected at compile time rather than picked once:
+
+- how a neighbour is bound (`Bound<T>`), by pixel type;
+- whether the four outputs are computed branchlessly
+  (`FU_VECTORIZES_MASKED_SELECTS`), by whether the compiler will vectorize the
+  loop at all. GCC does and is 2.4x faster branchless; clang does not, and is
+  1.4x faster keeping the branch that skips uniform areas. MSVC is grouped with
+  clang as the weaker auto-vectorizer.
+
+Both are documented at their definitions with the measurements behind them. If
+you retune, keep a bit-identity check against the previous implementation: every
+one of these choices is a pure performance trade and must not change output.
+
 ### Who selects it
 
 libserum stores the algorithm per colorization and reports it through
