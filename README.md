@@ -33,6 +33,21 @@ output:
   pixels are not `uint8_t`. libserum uses it to sample both 8-bit shade indices
   and 16-bit RGB565.
 
+### Frame borders
+
+Outside the frame is **black**, not a copy of the edge pixel. Clamping an
+out-of-bounds neighbour to the centre makes content touching an edge see its own
+colour beyond it — a false edge that trips Scale2x's rounding branch and shaves
+pixels off. DMD scores drawn on row 0 lost the tops of `8`, `S`, `0`, `9` and
+`3` for exactly this reason, and only there, because the same glyphs were intact
+lower down the frame.
+
+Because outside is a real value, the selection can land on it.
+`SelectUpscaled2xSourceIndex()` returns `Helper::kUpscaleSourceOutside` for that
+case rather than an index — **callers that index parallel planes with the result
+must test for it**. `SampleUpscaled2x()` and the whole-frame forms resolve it to
+black themselves.
+
 The per-pixel form is inherently 2x only: Scale4x is Scale2x applied twice and
 needs the intermediate frame, so a 4x addition belongs on the whole-frame API.
 

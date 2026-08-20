@@ -196,6 +196,13 @@ class Helper
                                uint16_t srcWidth, uint16_t srcHeight);
 
   /**
+   * Returned by SelectUpscaled2xSourceIndex() when the selected source lies
+   * outside the frame. Such a destination pixel is black; there is no index to
+   * read parallel planes from.
+   */
+  static constexpr uint32_t kUpscaleSourceOutside = 0xFFFFFFFFu;
+
+  /**
    * Per-pixel form of the 2x upscalers, expressed as a source *selection*.
    *
    * Returns the index into pSrcFrame that the whole-frame upscalers would take
@@ -216,8 +223,20 @@ class Helper
    * therefore invariant under rotation, so rotate-then-upscale and
    * upscale-then-rotate agree. See the constraint on ScalingAlgorithm above.
    *
-   * Out-of-bounds neighbors clamp to the center pixel, matching ScaleUp() and
-   * Scale2XIndexed() exactly.
+   * Outside the frame is BLACK, not a copy of the edge pixel. This matters:
+   * clamping an out-of-bounds neighbor to the center makes content touching an
+   * edge see its own colour "beyond" it -- a false edge that trips the rounding
+   * branch and shaves pixels off. Scores drawn on row 0 of a DMD lost the tops
+   * of 8, S, 0, 9 and 3 for exactly this reason, and only there, because the
+   * same glyphs were intact lower down the frame. Treating outside as black
+   * makes the two out-of-frame neighbors compare equal, so the guard fires and
+   * the center is kept.
+   *
+   * Because outside is a real value, the selection can land on it. That is
+   * returned as kUpscaleSourceOutside rather than an index: the destination
+   * pixel is genuinely outside the frame and its value is black. Callers that
+   * index parallel planes with the result MUST test for it. ScaleUp() and
+   * Scale2XIndexed() apply the same rule, and all three still agree exactly.
    *
    * Note this form is inherently 2x only. Scale4x is Scale2x applied twice and
    * needs the intermediate frame, so a 4x addition belongs on the whole-frame
@@ -232,16 +251,20 @@ class Helper
     const uint32_t center = sy * srcWidth + sx;
     if (algorithm != ScalingAlgorithm::Scale2x) return center;
 
-    const uint32_t above = (sy > 0) ? center - srcWidth : center;
-    const uint32_t below = (sy + 1 < srcHeight) ? center + srcWidth : center;
-    const uint32_t left = (sx > 0) ? center - 1 : center;
-    const uint32_t right = (sx + 1 < srcWidth) ? center + 1 : center;
+    const bool hasAbove = sy > 0;
+    const bool hasBelow = sy + 1 < srcHeight;
+    const bool hasLeft = sx > 0;
+    const bool hasRight = sx + 1 < srcWidth;
 
-    const T b = pSrcFrame[above];
-    const T h = pSrcFrame[below];
-    const T d = pSrcFrame[left];
-    const T f = pSrcFrame[right];
+    const T outside = T();
+    const T b = hasAbove ? pSrcFrame[center - srcWidth] : outside;
+    const T h = hasBelow ? pSrcFrame[center + srcWidth] : outside;
+    const T d = hasLeft ? pSrcFrame[center - 1] : outside;
+    const T f = hasRight ? pSrcFrame[center + 1] : outside;
     if (b == h || d == f) return center;
+
+    const uint32_t left = hasLeft ? center - 1 : kUpscaleSourceOutside;
+    const uint32_t right = hasRight ? center + 1 : kUpscaleSourceOutside;
 
     if (destY & 1)
     {
@@ -265,7 +288,8 @@ class Helper
   static inline T SampleUpscaled2x(const T* pSrcFrame, uint32_t srcWidth, uint32_t srcHeight, uint32_t destX,
                                    uint32_t destY, ScalingAlgorithm algorithm)
   {
-    return pSrcFrame[SelectUpscaled2xSourceIndex(pSrcFrame, srcWidth, srcHeight, destX, destY, algorithm)];
+    const uint32_t source = SelectUpscaled2xSourceIndex(pSrcFrame, srcWidth, srcHeight, destX, destY, algorithm);
+    return (source == kUpscaleSourceOutside) ? T() : pSrcFrame[source];
   }
 
   static void Center(uint8_t* pDestFrame, const uint16_t destWidth, const uint8_t destHeight, const uint8_t* pSrcFrame,
@@ -599,132 +623,51 @@ inline void Helper::ScaleDown(uint8_t* pDestFrame, const uint16_t destWidth, con
 inline void Helper::ScaleUp(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16_t srcWidth,
                             const uint8_t srcHeight, uint8_t bits)
 {
-  uint8_t bytes = bits / 8;  // RGB24 (3 byte) or RGB16 (2 byte) or indexed (1 byte)
-  uint16_t destWidth = srcWidth * 2;
-  memset(pDestFrame, 0, srcWidth * srcHeight * 4 * bytes);
+  // scale2x, http://www.scale2x.it/algorithm
+  const size_t bytes = bits / 8;  // RGB24 (3 byte) or RGB16 (2 byte) or indexed (1 byte)
+  const size_t destWidth = (size_t)srcWidth * 2;
+  const size_t row = (size_t)srcWidth * bytes;
+  memset(pDestFrame, 0, (size_t)srcWidth * srcHeight * 4 * bytes);
 
-  // we implement scale2x http://www.scale2x.it/algorithm
-  uint16_t row = srcWidth * bytes;
-  uint8_t* a = (uint8_t*)malloc(bytes);
-  uint8_t* b = (uint8_t*)malloc(bytes);
-  uint8_t* c = (uint8_t*)malloc(bytes);
-  uint8_t* d = (uint8_t*)malloc(bytes);
-  uint8_t* e = (uint8_t*)malloc(bytes);
-  uint8_t* f = (uint8_t*)malloc(bytes);
-  uint8_t* g = (uint8_t*)malloc(bytes);
-  uint8_t* h = (uint8_t*)malloc(bytes);
-  uint8_t* i = (uint8_t*)malloc(bytes);
+  // Outside the frame is black, not a copy of the edge pixel. See the border
+  // note on SelectUpscaled2xSourceIndex(). Only the four direct neighbors are
+  // read: scale2x never looks at the diagonals.
+  static const uint8_t kOutside[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+  auto pixel = [&](int x, int y) -> const uint8_t* {
+    if (x < 0 || y < 0 || x >= (int)srcWidth || y >= (int)srcHeight) return kOutside;
+    return &pSrcFrame[(size_t)y * row + (size_t)x * bytes];
+  };
 
   for (uint16_t y = 0; y < srcHeight; y++)
   {
     for (uint16_t x = 0; x < srcWidth; x++)
     {
-      for (uint8_t tc = 0; tc < bytes; tc++)
-      {
-        if (x == 0 && y == 0)
-        {
-          a[tc] = b[tc] = d[tc] = e[tc] = pSrcFrame[tc];
-          c[tc] = f[tc] = pSrcFrame[bytes + tc];
-          g[tc] = h[tc] = pSrcFrame[row + tc];
-          i[tc] = pSrcFrame[row + bytes + tc];
-        }
-        else if ((x == 0) && (y == srcHeight - 1))
-        {
-          a[tc] = b[tc] = pSrcFrame[(y - 1) * row + tc];
-          c[tc] = pSrcFrame[(y - 1) * row + bytes + tc];
-          d[tc] = g[tc] = h[tc] = e[tc] = pSrcFrame[y * row + tc];
-          f[tc] = i[tc] = pSrcFrame[y * row + bytes + tc];
-        }
-        else if ((x == srcWidth - 1) && (y == 0))
-        {
-          a[tc] = d[tc] = pSrcFrame[x * bytes - bytes + tc];
-          b[tc] = c[tc] = f[tc] = e[tc] = pSrcFrame[x * bytes + tc];
-          g[tc] = pSrcFrame[row + x * bytes - bytes + tc];
-          h[tc] = i[tc] = pSrcFrame[row + x * bytes + tc];
-        }
-        else if ((x == srcWidth - 1) && (y == srcHeight - 1))
-        {
-          a[tc] = pSrcFrame[y * row - 2 * bytes + tc];
-          b[tc] = c[tc] = pSrcFrame[y * row - bytes + tc];
-          d[tc] = g[tc] = pSrcFrame[srcHeight * row - 2 * bytes + tc];
-          e[tc] = f[tc] = h[tc] = i[tc] = pSrcFrame[srcHeight * row - bytes + tc];
-        }
-        else if (x == 0)
-        {
-          a[tc] = b[tc] = pSrcFrame[(y - 1) * row + tc];
-          c[tc] = pSrcFrame[(y - 1) * row + bytes + tc];
-          d[tc] = e[tc] = pSrcFrame[y * row + tc];
-          f[tc] = pSrcFrame[y * row + bytes + tc];
-          g[tc] = h[tc] = pSrcFrame[(y + 1) * row + tc];
-          i[tc] = pSrcFrame[(y + 1) * row + bytes + tc];
-        }
-        else if (x == srcWidth - 1)
-        {
-          a[tc] = pSrcFrame[y * row - 2 * bytes + tc];
-          b[tc] = c[tc] = pSrcFrame[y * row - bytes + tc];
-          d[tc] = pSrcFrame[(y + 1) * row - 2 * bytes + tc];
-          e[tc] = f[tc] = pSrcFrame[(y + 1) * row - bytes + tc];
-          g[tc] = pSrcFrame[(y + 2) * row - 2 * bytes + tc];
-          h[tc] = i[tc] = pSrcFrame[(y + 2) * row - bytes + tc];
-        }
-        else if (y == 0)
-        {
-          a[tc] = d[tc] = pSrcFrame[x * bytes - bytes + tc];
-          b[tc] = e[tc] = pSrcFrame[x * bytes + tc];
-          c[tc] = f[tc] = pSrcFrame[x * bytes + bytes + tc];
-          g[tc] = pSrcFrame[row + x * bytes - bytes + tc];
-          h[tc] = pSrcFrame[row + x * bytes + tc];
-          i[tc] = pSrcFrame[row + x * bytes + bytes + tc];
-        }
-        else if (y == srcHeight - 1)
-        {
-          a[tc] = pSrcFrame[(y - 1) * row + x * bytes - bytes + tc];
-          b[tc] = pSrcFrame[(y - 1) * row + x * bytes + tc];
-          c[tc] = pSrcFrame[(y - 1) * row + x * bytes + bytes + tc];
-          d[tc] = g[tc] = pSrcFrame[y * row + x * bytes - bytes + tc];
-          e[tc] = h[tc] = pSrcFrame[y * row + x * bytes + tc];
-          f[tc] = i[tc] = pSrcFrame[y * row + x * bytes + bytes + tc];
-        }
-        else
-        {
-          a[tc] = pSrcFrame[(y - 1) * row + x * bytes - bytes + tc];
-          b[tc] = pSrcFrame[(y - 1) * row + x * bytes + tc];
-          c[tc] = pSrcFrame[(y - 1) * row + x * bytes + bytes + tc];
-          d[tc] = pSrcFrame[y * row + x * bytes - bytes + tc];
-          e[tc] = pSrcFrame[y * row + x * bytes + tc];
-          f[tc] = pSrcFrame[y * row + x * bytes + bytes + tc];
-          g[tc] = pSrcFrame[(y + 1) * row + x * bytes - bytes + tc];
-          h[tc] = pSrcFrame[(y + 1) * row + x * bytes + tc];
-          i[tc] = pSrcFrame[(y + 1) * row + x * bytes + bytes + tc];
-        }
-      }
+      const uint8_t* e = pixel(x, y);
+      const uint8_t* b = pixel(x, (int)y - 1);
+      const uint8_t* h = pixel(x, (int)y + 1);
+      const uint8_t* d = pixel((int)x - 1, y);
+      const uint8_t* f = pixel((int)x + 1, y);
 
+      const uint8_t* e0 = e;
+      const uint8_t* e1 = e;
+      const uint8_t* e2 = e;
+      const uint8_t* e3 = e;
       if (memcmp(b, h, bytes) != 0 && memcmp(d, f, bytes) != 0)
       {
-        memcpy(&pDestFrame[(y * 2 * destWidth + x * 2) * bytes], memcmp(d, b, bytes) == 0 ? d : e, bytes);
-        memcpy(&pDestFrame[(y * 2 * destWidth + x * 2 + 1) * bytes], memcmp(b, f, bytes) == 0 ? f : e, bytes);
-        memcpy(&pDestFrame[((y * 2 + 1) * destWidth + x * 2) * bytes], memcmp(d, h, bytes) == 0 ? d : e, bytes);
-        memcpy(&pDestFrame[((y * 2 + 1) * destWidth + x * 2 + 1) * bytes], memcmp(h, f, bytes) == 0 ? f : e, bytes);
+        e0 = (memcmp(d, b, bytes) == 0) ? d : e;
+        e1 = (memcmp(b, f, bytes) == 0) ? f : e;
+        e2 = (memcmp(d, h, bytes) == 0) ? d : e;
+        e3 = (memcmp(h, f, bytes) == 0) ? f : e;
       }
-      else
-      {
-        memcpy(&pDestFrame[(y * 2 * destWidth + x * 2) * bytes], e, bytes);
-        memcpy(&pDestFrame[(y * 2 * destWidth + x * 2 + 1) * bytes], e, bytes);
-        memcpy(&pDestFrame[((y * 2 + 1) * destWidth + x * 2) * bytes], e, bytes);
-        memcpy(&pDestFrame[((y * 2 + 1) * destWidth + x * 2 + 1) * bytes], e, bytes);
-      }
+
+      const size_t outX = (size_t)x * 2;
+      const size_t outY = (size_t)y * 2;
+      memcpy(&pDestFrame[(outY * destWidth + outX) * bytes], e0, bytes);
+      memcpy(&pDestFrame[(outY * destWidth + outX + 1) * bytes], e1, bytes);
+      memcpy(&pDestFrame[((outY + 1) * destWidth + outX) * bytes], e2, bytes);
+      memcpy(&pDestFrame[((outY + 1) * destWidth + outX + 1) * bytes], e3, bytes);
     }
   }
-
-  free(a);
-  free(b);
-  free(c);
-  free(d);
-  free(e);
-  free(f);
-  free(g);
-  free(h);
-  free(i);
 }
 
 inline void Helper::ScaleUpIndexed(uint8_t* pDestFrame, const uint8_t* pSrcFrame, const uint16_t srcWidth,
@@ -884,11 +827,10 @@ inline void Helper::ScaleDoubleIndexed(uint8_t* pDestFrame, const uint8_t* pSrcF
 
 inline void Helper::Scale2XIndexed(uint8_t* pDestFrame, const uint8_t* pSrcFrame, uint16_t srcWidth, uint16_t srcHeight)
 {
+  // Outside the frame is black, not a copy of the edge pixel. See the border
+  // note on SelectUpscaled2xSourceIndex().
   auto getPixel = [&](int x, int y) -> uint8_t {
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x >= srcWidth) x = srcWidth - 1;
-    if (y >= srcHeight) y = srcHeight - 1;
+    if (x < 0 || y < 0 || x >= (int)srcWidth || y >= (int)srcHeight) return 0;
     return pSrcFrame[y * srcWidth + x];
   };
 
